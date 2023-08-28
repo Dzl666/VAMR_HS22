@@ -167,25 +167,6 @@ for iter = range
     t_i_W2C = -R_i_W2C * T_rigid_refine.Translation';
     T_i_W2C = [R_i_W2C, t_i_W2C];
 
-    % ========== self-implementation ==========
-    % % keep_x = (P_i(1,:) < 1 | P_i(1,:) > width);
-    % % keep_P(keep_x) = 0;
-    % % keep_y = (P_i(2,:) < 1 | P_i(2,:) > height);
-    % % keep_P(keep_y) = 0;
-    % P3P_confidence = 0.95;
-    % P3P_reprojectErr_thres = 10;
-    % [R_CnewW, t_CW, inlier_mask] = localizationP3P(P_i, X_i, K, P3P_confidence, P3P_reprojectErr_thres);
-    % M_frame = [R_CnewW, t_CW];
-
-    % % optimization of pose from P3P
-    % pose_error = @(pose) reprojectError(X_i, P_i, K* pose, false);
-    % options = optimoptions(@lsqnonlin, 'Algorithm', 'levenberg-marquardt',...
-    %     'MaxIter', 30, 'display', 'off');
-    % M_frame = lsqnonlin(pose_error, double(M_frame), [], [], options);    
-    % candidates from Localization [2, c2]   C_localize = P_i(:, (1 - inlier_mask) > 0);
-    % fprintf('Reprojection Error of P3P (with Optimization): %d\n', mean(reprojectError(X_i, P_i, K* M_frame, false), 2))
-    
-
     %% Track all candidates
     % use KLT to track kpt in C_i-1, process triangulate check 
     % in each tracked kpt in frame i
@@ -197,10 +178,6 @@ for iter = range
         if cfgs.ds == 2
             C_i = round(C_i);
         end
-        % keep_t = (C_i(1,:) < 1 | C_i(1,:) > width);
-        % keep_C(keep_t) = 0;
-        % keep_t = (C_i(2,:) < 1 | C_i(2,:) > height);
-        % keep_C(keep_t) = 0;
 
         F_i = F_prev(:, valid_C)';
         Tao_i = Tao_prev(:, valid_C)';
@@ -220,26 +197,6 @@ for iter = range
     C_add = round(img_corners(dist_new_exist_fea > cfgs.min_track_displm, :));
     C_cnt_add = ones(1, size(C_add, 1));
     Tao_add = repmat(reshape(T_i_W2C, [1, 12]), [size(C_add, 1), 1]);
-
-    % ========== self-implementation ==========
-    % num_kpts = 500;
-    % [~, new_kpt, inliers, ~] = bootstrapKLT(prev_img, img, num_kpts);
-    % new_kpt = new_kpt(inliers, :)';
-    
-    % new_C = [new_kpt, new_P(:, 1-reproject_keep > 0), C_KLT];
-    % keep_new_C = true(size(new_C, 2), 1);
-    % keep_t = (new_C(1,:) < 1 | new_C(1,:) > width);
-    % keep_new_C(keep_t) = 0;
-    % keep_t = (new_C(2,:) < 1 | new_C(2,:) > height);
-    % keep_new_C(keep_t) = 0;
-    % new_C = new_C(:, keep_new_C);
-    % num_new_candidate = size(new_C, 2);
-    % C_i = [C_i(:, keep_candidate), new_C];
-    % F_i = [F_i(:, keep_candidate), new_C];
-    % frame_pose = reshape(M_frame, [12, 1]);
-    % Tao_i = [Tao_i(:, keep_candidate), repmat(frame_pose, 1, num_new_candidate)];
-    % fprintf('Current candidate number: %d\n', size(C_i, 2));
-    
     
     %% Triangulate new points and landmarks from candidates
 
@@ -299,16 +256,6 @@ for iter = range
             end
             X_add = bundleAdjustmentStructure(X_add, kpt_array, tab, camParams, 'PointsUndistorted', true);
         end
-
-    % ========== self-implementation ==========
-    %     alpha_thres = 1;
-    %     % [2, p], [3, p], [q]
-    %     [new_P, new_X, keep_candidate] =...
-    %         triangulateTrackingPoints(C_i, M_frame, F_i, Tao_i, K, alpha_thres);
-    %     % re-projection checking
-    %     reproject_err = reprojectError(new_X, new_P, K*M_frame, false);
-    %     reproject_keep = reproject_err < 0.5;
-    %     
     end
 
 

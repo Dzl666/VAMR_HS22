@@ -5,30 +5,6 @@ function [R_C2W, t_C2W, kpt_init, P3d_init] = bootstrapKLT(img0, img1, cfgs, cam
     harris_features = detectHarrisFeatures(img0, 'MinQuality', cfgs.min_harris_q);
     img0_corners = selectStrongest(harris_features, cfgs.max_corners_boot).Location;
 
-    % ========== self-implementation ==========
-    % % find kpts from both imgs using Harris detector
-    % harris_patch_size = 9;
-    % harris_kappa = 0.08;
-    % NMS_radius = 8;
-    % descriptor_radius = 9;
-    % match_lambda = 8;
-
-    % img0_harris = harris(img0, harris_patch_size, harris_kappa);
-    % img1_harris = harris(img1, harris_patch_size, harris_kappa);
-    % % [h,w], N, int -> kpts [2, N]
-    % img0_keypoints = selectKeypoints(img0_harris, num_kpts, NMS_radius);
-    % img1_keypoints = selectKeypoints(img1_harris, num_kpts, NMS_radius);
-    % % [(2r+1)^2, N]
-    % img0_descriptors = describeKeypoints(img0, img0_keypoints, descriptor_radius);
-    % img1_descriptors = describeKeypoints(img1, img1_keypoints, descriptor_radius);
-    % % , [(2r+1)^2, N], int -> matches [1, Q]
-    % matches = matchDescriptors(img1_descriptors, img0_descriptors, match_lambda);
-    % % both [N, 2]
-    % matched_p1 = img0_keypoints(:, matches(matches > 0))';
-    % matched_p2 = img1_keypoints(:, matches > 0)';
-    % matched_p1 = fliplr(matched_p1);
-    % matched_p2 = fliplr(matched_p2);
-
     kptTracker = vision.PointTracker('MaxBidirectionalError', cfg.max_track_bidir_error);
     
     % use [N, 2] (x, y) keypoints
@@ -67,15 +43,6 @@ function [R_C2W, t_C2W, kpt_init, P3d_init] = bootstrapKLT(img0, img1, cfgs, cam
     % get relative pose of 2 cams using lib func
     % pose of cam2 related to cam 1
     [R_C2W, t_C2W] = relativeCameraPose(E, camParams, matched_p1,matched_p2);
-
-    % ========== self-implementation ==========
-    % % decompose E and check possible pose [3, 3] -> [3,3,2], [3,1]
-    % [Rots, u3] = decomposeEssentialMatrix(E);
-    % homo_matched_p1 = [matched_p1'; ones(1, length(matched_p1))];
-    % homo_matched_p2 = [matched_p2'; ones(1, length(matched_p2))];
-    % % [3,3,2], [3,1], [3, N], [3, N], [3,3], [3,3] -> [3,3], [3,1]
-    % % care about the dir of the R & t
-    % [R_C2W, t_C2W] = disambiguateRelativePose(Rots, u3, homo_matched_p1, homo_matched_p2, K, K);
     
     % triangulate the first landmarks from the bootstrap imgs
     M1 = cameraMatrix(camParams, eye(3), [0,0,0]);
