@@ -1,9 +1,9 @@
 function [new_P, new_X, keep_candidate] =...
     triangulateTrackingPoints(cur_C, cur_T, track_C, track_T, K, angle_thres)
-% cur_C [2 ,c]: candidate kpts in current frame
-% track_C [2 ,c]: tracked kpts corresponding to candidate kpts
+% cur_C [2 ,c]: C_i, candidate kpts in current frame
+% track_C [2 ,c]: F_i, tracked kpts corresponding to candidate kpts
 % cur_T [3, 4]: pose of current frame, C_cur to W 
-% track_T [12, c]: frame pose corresponding to candidate kpts, C_track to W
+% track_T [12, c]: Tao_i, frame pose corresponding to F_i
     num_candidate = size(cur_C, 2);
     new_P = zeros(2, num_candidate);
     new_X = zeros(3, num_candidate);
