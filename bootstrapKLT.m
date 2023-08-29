@@ -5,7 +5,7 @@ function [R_C2W, t_C2W, kpt_init, P3d_init] = bootstrapKLT(img0, img1, cfgs, cam
     harris_features = detectHarrisFeatures(img0, 'MinQuality', cfgs.min_harris_q);
     img0_corners = selectStrongest(harris_features, cfgs.max_corners_boot).Location;
 
-    kptTracker = vision.PointTracker('MaxBidirectionalError', cfg.max_track_bidir_error);
+    kptTracker = vision.PointTracker('MaxBidirectionalError', cfgs.max_track_bidir_error);
     
     % use [N, 2] (x, y) keypoints
     initialize(kptTracker, img0_corners, img0);
@@ -43,10 +43,11 @@ function [R_C2W, t_C2W, kpt_init, P3d_init] = bootstrapKLT(img0, img1, cfgs, cam
     % get relative pose of 2 cams using lib func
     % pose of cam2 related to cam 1
     [R_C2W, t_C2W] = relativeCameraPose(E, camParams, matched_p1,matched_p2);
+    t_C2W = t_C2W';
     
     % triangulate the first landmarks from the bootstrap imgs
     M1 = cameraMatrix(camParams, eye(3), [0,0,0]);
-    M2 = cameraMatrix(camParams, R_C2W', -R_C2W' * t_C2W');
+    M2 = cameraMatrix(camParams, R_C2W', -R_C2W' * t_C2W);
  
     [P, ~, valid_P] = triangulate(matched_p1, matched_p2, M1, M2);
     % ========== self-implementation ==========
@@ -66,16 +67,15 @@ function [R_C2W, t_C2W, kpt_init, P3d_init] = bootstrapKLT(img0, img1, cfgs, cam
 
     if cfgs.plot_init
         figure(1)
+
         subplot(2,2,1)
-        plot3(P(1,:), P(2,:), P(3,:), 'o');
-        plotCoordinateFrame(eye(3),zeros(3,1), 0.8);
+        plot3(P(1,:), P(2,:), P(3,:), 'o'); hold on;
+        plotCoordinateFrame(eye(3), zeros(3,1), 0.8);
         text(-0.1,-0.1,-0.1,'Cam 1','fontsize',10,'color','k','FontWeight','bold');
-        plotCoordinateFrame(R_C2W, t_C2W', 0.8);
+        plotCoordinateFrame(R_C2W, t_C2W, 0.8);
         text(t_C2W(1)-0.1, t_C2W(2)-0.1, t_C2W(3)-0.1,'Cam 2','fontsize',10,'color','k','FontWeight','bold');
-        axis equal
-        rotate3d on;
-        grid
-        title('3d point cloud and cameras')
+        axis equal; rotate3d on; grid on; view(0,0);
+        title('3d point cloud and cameras'); hold off;
 
         subplot(2,2, 3:4)
         showMatchedFeatures(img0, img1, matched_p1, matched_p2, "montage");
