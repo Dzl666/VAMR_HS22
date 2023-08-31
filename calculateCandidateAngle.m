@@ -4,17 +4,17 @@ function angle = calculateCandidateAngle(C, T, F, Tao, K)
 % T [3, 4]: pose of current frame, Cam to World 
 % Tao [12, c]: Tao_i, frame pose corresponding to F_i
 
-    num_candidates = size(track_C, 1);
-    cur_C = K \ [cur_C'; ones(1, num_candidates)]; % 3xc
-    track_C = K \ [track_C'; ones(1, num_candidates)]; % 3xc
-    angle = zeros(num_candidates, 1); 
-    
-    for i = 1:num_candidates
-        R_t = T(1:3, 1:3)';
-        Tao = reshape(Tao(i, :), [3, 4]);
-        R_f = Tao(1:3, 1:3)';
+    num_candidates = size(F, 1);
+    C = K \ [C'; ones(1, num_candidates)]; % 3xc
+    F = K \ [F'; ones(1, num_candidates)]; % 3xc
+    angle = zeros(num_candidates, 1);
 
+    R_t = T(1:3, 1:3)';
+    parfor i = 1:num_candidates
+        T_f = reshape(Tao(i, :), [3, 4]);
+        R_f = T_f(1:3, 1:3)'; % C2W
         Tro =  R_f' * R_t ;
+        
         angle(i) = acos(dot(C(:,i), Tro * F(:,i)) / (norm(C(:,i)) * norm(Tro * F(:,i))));
 
         % ========== another implementation ==========

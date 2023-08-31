@@ -1,6 +1,8 @@
 function img = loadImage(ds, frame_idx)
     kitti_path = 'datasets/kitti';
     malaga_path = 'datasets/malaga-urban';
+    images = dir([malaga_path '/malaga-urban-dataset-extract-07_rectified_800x600_Images']);
+    left_images = images(3:2:end);
     parking_path = 'datasets/parking';
     % get next frame
     if ds == 0

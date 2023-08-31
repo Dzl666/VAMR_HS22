@@ -1,78 +1,85 @@
 function [P_total, X_total, C_total, F_total, Tao_total, C_cnt_total, T_i_W2C] = continuousTracking(img_prev, img,...
     camParams, cfgs, P_prev, X_prev, C_prev, F_prev, Tao_prev, C_cnt_prev, R_W2C_prev, t_W2C_prev)
-
 % P_i [2, n] - kpt in the i-th frame that has correspongding landmark X_i [3, n]
 % C_i [2, m] - kpt in the i-th frame that doesn't match a landmark
 % F_i [2, m]- kpt at the first frame that a tracked candidate appeared, corres. to each C_i
-% Tao_i [12, m] - cam pose of first frame that F_i occur
+% Tao_i [12, m] - cam pose of first frame that F_i occur, W2C
 % C_cnt_i [m] - count successful tracked frames of a candidate
 
     %% Track all key points
     % use P_i-1 to track P_i by KLT
-    kptTracker = vision.PointTracker('MaxBidirectionalError', cfgs.max_track_bidir_error);  
+    kptTracker = vision.PointTracker('MaxBidirectionalError', cfgs.max_KLT_bidir_err,...
+        'NumPyramidLevels', cfgs.KLT_pyrmid_level);
     initialize(kptTracker, P_prev', img_prev);
-    [P_new, valid_P] = kptTracker(img);
+    [P_i, valid_P] = kptTracker(img);
     release(kptTracker);
-    P_i = P_new(valid_P, :);
+    P_i = P_i(valid_P, :);
     if cfgs.ds == 2
         P_i = round(P_i);
     end
     X_i = X_prev(:, valid_P)';
-
-    fprintf('Keypoints success tracked: %d\n', nnz(valid_P));
-
+    fprintf('Kpts tracked: %d\n', nnz(valid_P));
 
     %% RANSAC P3P + NL pose optimization
-    % use P_i and X_i to estimate cam pose T_CW = [R_CW | t_CW] in the current frame
-    % record the P_i and correspongding X_i-1(X_i) that pass the RANSAC
-    % for kpt not passing the test, store them in C_t
+    % use P_i and X_i to estimate cam pose T_CW = [R_CW | t_CW] in the
+    % current frame
     [R_W2C, t_W2C, inliers_kpt] = estimateWorldCameraPose(P_i, X_i, camParams, 'Confidence', cfgs.ransac_conf,...
-        'MaxNumTrials', cfgs.max_ransac_iters, 'MaxReprojectionError', cgfs.max_ransac_err);
+        'MaxNumTrials', cfgs.max_ransac_iters, 'MaxReprojectionError', cfgs.max_ransac_reproj_err);
     P_i = P_i(inliers_kpt, :);
     X_i = X_i(inliers_kpt, :);
 
-    fprintf('Keypoints success to localize: %d\n', nnz(inliers_kpt));
+    % for kpt not passing the test, store them in C_t ?
 
-    T_rigid = rigid3d(R_W2C, t_W2C)
+    % pose optimization
+    T_rigid = rigid3d(R_W2C, t_W2C);
     T_rigid_refine = bundleAdjustmentMotion(X_i, P_i, T_rigid, camParams, 'PointsUndistorted', true);
     R_i_W2C = T_rigid_refine.Rotation';
     t_i_W2C = -R_i_W2C * T_rigid_refine.Translation';
     T_i_W2C = [R_i_W2C, t_i_W2C];
 
     %% Track all candidates
-    % use KLT to track kpt in C_i-1, process triangulate check 
-    % in each tracked kpt in frame i
+    C_i = [];
+    F_i = F_prev';
+    Tao_i = Tao_prev';
+    C_cnt_i = C_cnt_prev;
+    % use KLT to track kpt in C_i-1
     if not(isempty(C_prev))
-        candTracker = vision.PointTracker('MaxBidirectionalError', cfgs.max_track_bidir_error);
+        candTracker = vision.PointTracker('MaxBidirectionalError', cfgs.max_KLT_bidir_err,...
+            'NumPyramidLevels', cfgs.KLT_pyrmid_level);
         initialize(candTracker, C_prev', img_prev);   
-        [C_new, valid_C] = candTracker(img);
-        C_i = C_new(valid_C, :);
+        [C_i, valid_C] = candTracker(img);
+        release(candTracker);
+        C_i = C_i(valid_C, :);
         if cfgs.ds == 2
             C_i = round(C_i);
         end
         F_i = F_prev(:, valid_C)';
         Tao_i = Tao_prev(:, valid_C)';
         C_cnt_i = C_cnt_prev(valid_C) + 1;
-
-        fprintf('Candidate kpts success tracked: %d\n', nnz(valid_C));
     end
+    fprintf('Cands tracked: %d\n', size(C_i, 1));
 
     %% Find new candidates
     % extract features
     harris_features = detectHarrisFeatures(img, 'MinQuality', cfgs.min_harris_q);
     img_corners = selectStrongest(harris_features, cfgs.max_corners).Location;
 
-    % update the newly occur candidate kpt C_t into C_i and F_i, as well as Tao_i
-    % take care about rudundant!!!!!
+    % update the newly occur candidate kpt C_add into C_i and F_i, as well as Tao_i
     exist_fea = [P_i; C_i];
     dist_new_exist_fea = min(pdist2(img_corners, exist_fea), [], 2);
+    % take care about rudundant points !!!!!
     C_add = round(img_corners(dist_new_exist_fea > cfgs.min_track_displm, :));
-    C_cnt_add = ones(1, size(C_add, 1));
     Tao_add = repmat(reshape(T_i_W2C, [1, 12]), [size(C_add, 1), 1]);
+    C_cnt_add = ones(1, size(C_add, 1));
     
     %% Triangulate new points and landmarks from candidates
+    P_add = [];
+    X_add = [];
+    F_corres = [];
+    % perform triangulate check for each kpt in C_i
     if not(isempty(C_i))
-        angles = calculateCandidateAngle(C_i, T_i_W2C, F_i, Tao_i, K)
+        % [num_C, 1]
+        angles = calculateCandidateAngle(C_i, T_i_W2C, F_i, Tao_i, camParams.IntrinsicMatrix');
 
         valid_angle = abs(angles) > cfgs.min_triangulate_angle;
         valid_cnt = C_cnt_i > cfgs.min_cons_frames;
@@ -81,23 +88,23 @@ function [P_total, X_total, C_total, F_total, Tao_total, C_cnt_total, T_i_W2C] =
         P_add = C_i(valid_new_kpt, :);
         F_corres = F_i(valid_new_kpt, :);
         Tao_corres = Tao_i(valid_new_kpt, :);
-        cnt_corres = C_cnt_i(valid_new_kpt);
+        C_cnt_corres = C_cnt_i(valid_new_kpt);
+
         X_add = zeros(size(P_add, 1), 3);
-        reproj_err = []; valid_add = [];
+        valid_add = zeros(size(P_add, 1), 1);
 
         % triangulate & checking
-        for k = 1 : size(P_add, 1)
-            Tao_temp = reshape(Tao_corres(k, :), [3,4]);
-            R_f = Tao_temp(:, 1:3);
-            t_f = Tao_temp(:, 4);
-            M1 = cameraMatrix(camParams, R_f, t_f);
-            M2 = cameraMatrix(camParams, R_i_W2C, t_i_W2C);
-
-            [X_add(k,:), reproj_err(k), valid_add(k)] = triangulate(F_corres(k,:), P_add(k,:), M1, M2);
-
-            % checking
-            if reproj_err(k) > cfgs.max_reproj_err || norm(X_add(k,:)' - t_i_W2C) > cfgs.max_dist_P3d
-                valid_add(k) = 0
+        M2 = cameraMatrix(camParams, R_i_W2C, t_i_W2C);
+        max_triangulate_reproj_err = cfgs.max_reproj_err;
+        max_triangulate_P3d_dist = cfgs.max_dist_P3d;
+        parfor k = 1 : size(P_add, 1)
+            Tao_temp = reshape(Tao_corres(k, :), [3,4]); % W2C
+            M1 = cameraMatrix(camParams, Tao_temp(:, 1:3), Tao_temp(:, 4));
+            
+            [X_add(k,:), reproj_err, valid_add(k)] = triangulate(F_corres(k,:), P_add(k,:), M1, M2);
+            % delete kpts with too large reprojection err / P3d too far away
+            if reproj_err > max_triangulate_reproj_err || norm(abs(X_add(k,:)') - abs(t_i_W2C)) > max_triangulate_P3d_dist
+                valid_add(k) = 0;
             end
         end
 
@@ -105,46 +112,48 @@ function [P_total, X_total, C_total, F_total, Tao_total, C_cnt_total, T_i_W2C] =
         valid_add = valid_add > 0;
         if not(isempty(P_add))
             % clean C, F, Tao, C_cnt
-            invalid_add = not(valid_add)
-            invalid_new_kpt = not(valid_new_kpt)
+            invalid_add = not(valid_add);
+            invalid_new_kpt = not(valid_new_kpt);
+            
             C_i = [P_add(invalid_add, :); C_i(invalid_new_kpt, :)];
             F_i = [F_corres(invalid_add, :); F_i(invalid_new_kpt, :)];
             Tao_i = [Tao_corres(invalid_add, :); Tao_i(invalid_new_kpt, :)];
-            C_cnt_i = [cnt_corres(invalid_add, :); C_cnt_i(invalid_new_kpt, :)];
+            C_cnt_i = [C_cnt_corres(invalid_add), C_cnt_i(invalid_new_kpt)];
             % clean P_add, X_add
             P_add = P_add(valid_add, :);
             F_corres = F_corres(valid_add, :);
             X_add = X_add(valid_add, :);
         end
-        fprintf('New 2D-3D pairs triangulated: %d\n', nnz(valid_add));
+        fprintf('Pairs triangulated: %d\n', nnz(valid_add));
 
         % optimize
         if not(isempty(P_add))
-            absPose = rigid3d(R_i_W2C', (-R_i_W2C' * t_i_W2C)');
-            viewId = uint32(1);
-            tab = table(viewId, absPose);
-            u = P_add(:, 1); v = P_add(:, 2);
+            u = P_add(:, 1);
+            v = P_add(:, 2);
             kpt_array = [pointTrack(1, [u(1), v(1)])];
             parfor k = 2 : size(P_add, 1)
                 kpt_array(k) = pointTrack(1, [u(k), v(k)]);
             end
+            ViewId = uint32(1);
+            AbsolutePose = rigid3d(R_i_W2C', (-R_i_W2C' * t_i_W2C)');
+            tab = table(ViewId, AbsolutePose);
             X_add = bundleAdjustmentStructure(X_add, kpt_array, tab, camParams, 'PointsUndistorted', true);
         end
     end
 
 
     %% collect all particals
-    P_total = [P_i; P_add];
-    X_total = [X_i; X_add];
-    C_total = [C_i; C_add];
-    F_total = [F_i; C_add];
-    Tao_total = [Tao_i; Tao_add];
+    P_total = [P_i; P_add]';
+    X_total = [X_i; X_add]';
+    C_total = [C_i; C_add]';
+    F_total = [F_i; C_add]';
+    Tao_total = [Tao_i; Tao_add]';
     C_cnt_total = [C_cnt_i, C_cnt_add];
 
     %% plotting
     if cfgs.plot_kpts_cands
         figure(3)
-        subplot(2,2,2)
+        subplot(2,3,1:3)
         imshow(img); hold on;
         % plot all tracked kpts
         plot(P_i(:,1), P_i(:,2), '.g');
@@ -156,30 +165,31 @@ function [P_total, X_total, C_total, F_total, Tao_total, C_cnt_total, T_i_W2C] =
         if not(isempty(C_add))
             plot(C_add(:,1), C_add(:,2), '.m')
         end
-        %  
+        %  plot new added P and corres. F
         if not(isempty(P_add))
-            plot(P_add(:,1), P_add(:,2), 'cs'); 
-            plot(F_corres(:,1), F_corres(:,2), 'bs');
+            plot(P_add(:,1), P_add(:,2), 'cx'); 
+            plot(F_corres(:,1), F_corres(:,2), 'bx');
             plot([P_add(:,1)'; F_corres(:,1)'], [P_add(:,2)'; F_corres(:,2)'], 'y-', 'Linewidth', 1);
         end
-        title("kpt (green), cand (red), new cand (magenta)"); hold off;
+        title("kpt (g), cand (r), new cand (m), triangulate pair (y)"); hold off;
     end
 
     if cfgs.plot_cam_pose
         figure(3)
-        subplot(2,2,3)
-        plot3(X_i(:,1), X_i(:,2), X_i(:,3), 'bo'); hold on;
-        if not(isempty(X_add))
-            plot3(X_add(:,1), X_add(:,2), X_add(:,3), 'ro');
-        end
-
+        subplot(2,3,4)
+%         plot3(X_i(:,1), X_i(:,2), X_i(:,3), 'bo'); 
+%         if not(isempty(X_add))
+%             plot3(X_add(:,1), X_add(:,2), X_add(:,3), 'ro');
+%         end
+        axis equal; view(0,0); grid on; rotate3d on; hold on;
+        plotCoordinateFrame(R_W2C_prev', -R_W2C_prev' * t_W2C_prev, 1);
         t_C2W = -R_i_W2C' * t_i_W2C;
-        plot3(t_C2W(1), t_C2W(2), t_C2W(3))
-        plotCoordinateFrame(R_W2C_prev', -R_W2C_prev' * t_W2C_prev, 0.8);
-        plotCoordinateFrame(R_i_W2C', t_C2W, 0.8);
-        text(t_C2W(1)-0.1, t_C2W(2)-0.1, t_C2W(3)-0.1,'Cam','fontsize',10,'color','k','FontWeight','bold');
-        axis equal; rotate3d on; grid on; view(0,0);
-        title('Cameras poses'); hold off;
+        plot3(t_C2W(1), t_C2W(2), t_C2W(3)); 
+        plotCoordinateFrame(R_i_W2C', t_C2W, 1);
+        xlim([t_C2W(1)-3, t_C2W(1)+3]);
+        ylim([t_C2W(2)-3, t_C2W(2)+3]);
+        zlim([t_C2W(3)-3, t_C2W(3)+3]);
+        title('Cameras poses');
     end
  
 end
