@@ -1,5 +1,5 @@
 function [P_total, X_total, C_total, F_total, Tao_total, C_cnt_total, T_i_W2C] = continuousTracking(img_prev, img,...
-    camParams, cfgs, P_prev, X_prev, C_prev, F_prev, Tao_prev, C_cnt_prev, R_W2C_prev, t_W2C_prev)
+    camParams, cfgs, P_prev, X_prev, C_prev, F_prev, Tao_prev, C_cnt_prev)
 % P_i [2, n] - kpt in the i-th frame that has correspongding landmark X_i [3, n]
 % C_i [2, m] - kpt in the i-th frame that doesn't match a landmark
 % F_i [2, m]- kpt at the first frame that a tracked candidate appeared, corres. to each C_i
@@ -21,8 +21,7 @@ function [P_total, X_total, C_total, F_total, Tao_total, C_cnt_total, T_i_W2C] =
     fprintf('Kpts tracked: %d\n', nnz(valid_P));
 
     %% RANSAC P3P + NL pose optimization
-    % use P_i and X_i to estimate cam pose T_CW = [R_CW | t_CW] in the
-    % current frame
+    % use P_i and X_i to estimate cam pose T_CW in the current frame
     [R_W2C, t_W2C, inliers_kpt] = estimateWorldCameraPose(P_i, X_i, camParams, 'Confidence', cfgs.ransac_conf,...
         'MaxNumTrials', cfgs.max_ransac_iters, 'MaxReprojectionError', cfgs.max_ransac_reproj_err);
     P_i = P_i(inliers_kpt, :);
@@ -31,7 +30,7 @@ function [P_total, X_total, C_total, F_total, Tao_total, C_cnt_total, T_i_W2C] =
     % for kpt not passing the test, store them in C_t ?
 
     % pose optimization
-    T_rigid = rigid3d(R_W2C, t_W2C);
+    T_rigid = rigidtform3d(R_W2C, t_W2C);
     T_rigid_refine = bundleAdjustmentMotion(X_i, P_i, T_rigid, camParams, 'PointsUndistorted', true);
     R_i_W2C = T_rigid_refine.Rotation';
     t_i_W2C = -R_i_W2C * T_rigid_refine.Translation';
@@ -60,11 +59,9 @@ function [P_total, X_total, C_total, F_total, Tao_total, C_cnt_total, T_i_W2C] =
     fprintf('Cands tracked: %d\n', size(C_i, 1));
 
     %% Find new candidates
-    % extract features
     harris_features = detectHarrisFeatures(img, 'MinQuality', cfgs.min_harris_q);
     img_corners = selectStrongest(harris_features, cfgs.max_corners).Location;
 
-    % update the newly occur candidate kpt C_add into C_i and F_i, as well as Tao_i
     exist_fea = [P_i; C_i];
     dist_new_exist_fea = min(pdist2(img_corners, exist_fea), [], 2);
     % take care about rudundant points !!!!!
@@ -79,7 +76,7 @@ function [P_total, X_total, C_total, F_total, Tao_total, C_cnt_total, T_i_W2C] =
     % perform triangulate check for each kpt in C_i
     if not(isempty(C_i))
         % [num_C, 1]
-        angles = calculateCandidateAngle(C_i, T_i_W2C, F_i, Tao_i, camParams.IntrinsicMatrix');
+        angles = calculateCandidateAngle(C_i', T_i_W2C, F_i', Tao_i', camParams.IntrinsicMatrix');
 
         valid_angle = abs(angles) > cfgs.min_triangulate_angle;
         valid_cnt = C_cnt_i > cfgs.min_cons_frames;
@@ -135,8 +132,9 @@ function [P_total, X_total, C_total, F_total, Tao_total, C_cnt_total, T_i_W2C] =
                 kpt_array(k) = pointTrack(1, [u(k), v(k)]);
             end
             ViewId = uint32(1);
-            AbsolutePose = rigid3d(R_i_W2C', (-R_i_W2C' * t_i_W2C)');
+            AbsolutePose = rigidtform3d(R_i_W2C', (-R_i_W2C' * t_i_W2C)');
             tab = table(ViewId, AbsolutePose);
+
             X_add = bundleAdjustmentStructure(X_add, kpt_array, tab, camParams, 'PointsUndistorted', true);
         end
     end
@@ -182,7 +180,6 @@ function [P_total, X_total, C_total, F_total, Tao_total, C_cnt_total, T_i_W2C] =
 %             plot3(X_add(:,1), X_add(:,2), X_add(:,3), 'ro');
 %         end
         axis equal; view(0,0); grid on; rotate3d on; hold on;
-        plotCoordinateFrame(R_W2C_prev', -R_W2C_prev' * t_W2C_prev, 1);
         t_C2W = -R_i_W2C' * t_i_W2C;
         plot3(t_C2W(1), t_C2W(2), t_C2W(3)); 
         plotCoordinateFrame(R_i_W2C', t_C2W, 1);

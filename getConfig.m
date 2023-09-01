@@ -1,13 +1,13 @@
 function [args] = getConfig()
     %   function to get data structure with all paramters 
     
-    ds = 1; % 0: KITTI, 1: Malaga, 2: parking
+    ds = 0; % 0: KITTI, 1: Malaga, 2: parking
     bootstrap_frames = [1, 3]; %frames for bootstrap
     
     % feature extraction
     min_harris_q = 1e-5; % harris minimum quality (weakest kept score / strongest score)
-    max_corners_boot = 1000; % maximum number of corner detected in bootstrap
-    max_corners = 500; % maximum number of corner detected
+    max_corners_boot = 800; % maximum number of corner detected in bootstrap
+    max_corners = 600; % maximum number of corner detected
     
     % KLT tracking
     max_KLT_bidir_err = 1; % maximum bidirectional error KLT tracker
@@ -16,7 +16,7 @@ function [args] = getConfig()
     
     % RANSAC
     max_ransac_iters = 6000;
-    ransac_conf = 99.99;
+    ransac_conf = 99.995;
     max_ransac_dist_err = 0.3;
     max_ransac_reproj_err = 2;
 
@@ -28,7 +28,7 @@ function [args] = getConfig()
     % Triangulation
     max_dist_P3d = 100; % filter out 3d points that are too far from the cam
     max_reproj_err = 3; % max reprojection error
-    min_cons_frames = 4; % min consecutive frames between Fi_j & Ci_j that can triangulate
+    min_cons_frames = 3; % min consecutive frames between Fi_j & Ci_j that can triangulate
     min_triangulate_angle = 10 * pi / 180; % min angle for triangulation
     
     % Debug and ploting
